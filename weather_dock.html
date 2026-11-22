@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>お天気地域コントローラー</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #18191c;
+    color: #f1f5f9;
+    font-family: "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", sans-serif;
+    padding: 12px;
+    font-size: 13px;
+  }
+  h2 {
+    font-size: 14px;
+    margin-bottom: 10px;
+    color: #93c5fd;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 6px;
+  }
+  .city-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .city-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #27292e;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .city-item:hover { background: #32353c; }
+  .city-item input { cursor: pointer; }
+  .btn-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  button {
+    flex: 1;
+    padding: 7px 8px;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .btn-apply {
+    background: #2563eb;
+    color: #fff;
+  }
+  .btn-apply:hover { background: #1d4ed8; }
+  .btn-sub {
+    background: #374151;
+    color: #e5e7eb;
+  }
+  .btn-sub:hover { background: #4b5563; }
+  .status {
+    font-size: 11px;
+    color: #86efac;
+    min-height: 16px;
+  }
+</style>
+</head>
+<body>
+
+  <h2>表示する地域を選択</h2>
+
+  <div class="btn-row">
+    <button class="btn-sub" id="btn-all">全選択</button>
+    <button class="btn-sub" id="btn-clear">全解除</button>
+  </div>
+
+  <div class="city-list" id="city-list"></div>
+
+  <button class="btn-apply" style="width: 100%;" id="btn-apply">表示に反映</button>
+  <div class="status" id="status"></div>
+
+<script>
+  const STORAGE_KEY = "obs_weather_selected_cities_v1";
+  const CITY_NAMES = ["札幌", "仙台", "東京", "金沢", "名古屋", "大阪", "広島", "福岡", "那覇"];
+
+  const listEl = document.getElementById("city-list");
+  const statusEl = document.getElementById("status");
+  const channel = new BroadcastChannel("obs_weather_channel");
+
+  function getSavedSelection() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch (e) {}
+    return [...CITY_NAMES];
+  }
+
+  function renderCheckboxes() {
+    const selected = getSavedSelection();
+    listEl.innerHTML = "";
+    CITY_NAMES.forEach(name => {
+      const label = document.createElement("label");
+      label.className = "city-item";
+      const checked = selected.includes(name) ? "checked" : "";
+      label.innerHTML = `<input type="checkbox" value="${name}" ${checked}><span>${name}</span>`;
+      listEl.appendChild(label);
+    });
+  }
+
+  function applySelection() {
+    const checkedNames = Array.from(listEl.querySelectorAll("input[type='checkbox']:checked"))
+      .map(el => el.value);
+
+    if (checkedNames.length === 0) {
+      statusEl.style.color = "#fca5a5";
+      statusEl.textContent = "※ 少なくとも1都市を選択してください";
+      return;
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(checkedNames));
+    channel.postMessage({ type: "UPDATE_CITIES", cities: checkedNames });
+
+    statusEl.style.color = "#86efac";
+    statusEl.textContent = `反映しました（${checkedNames.join("・")}）`;
+  }
+
+  document.getElementById("btn-apply").addEventListener("click", applySelection);
+
+  document.getElementById("btn-all").addEventListener("click", () => {
+    listEl.querySelectorAll("input[type='checkbox']").forEach(cb => cb.checked = true);
+  });
+
+  document.getElementById("btn-clear").addEventListener("click", () => {
+    listEl.querySelectorAll("input[type='checkbox']").forEach(cb => cb.checked = false);
+  });
+
+  renderCheckboxes();
+</script>
+</body>
+</html>
