@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>OBS 全国お天気横スクロール</title>
+<style>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    background-color: transparent;
+    font-family: "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", sans-serif;
+    overflow: hidden;
+  }
+
+  .weather-box {
+    position: relative;
+    width: 360px;
+    height: 76px;
+    background: rgba(18, 24, 38, 0.1);
+ /*   border: 2px solid rgba(255, 255, 255, 0.25);  */
+    border-radius: 12px;
+    color: #ffffff;
+/*    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); */
+    overflow: hidden;
+  }
+
+  .slide-item {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    transition: transform 1s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+
+  .slide-item.center { transform: translateX(0); }
+  .slide-item.right  { transform: translateX(100%); }
+  .slide-item.left   { transform: translateX(-100%); }
+
+  .city-name {
+    background: linear-gradient(135deg, #2b7de9, #1b5bbf);
+    color: #fff;
+    font-size: 22px;
+    font-weight: bold;
+    padding: 6px 14px;
+    border-radius: 8px;
+    margin-right: 16px;
+    min-width: 84px;
+    text-align: center;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+  }
+
+  .weather-icon {
+    font-size: 36px;
+    margin-right: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .weather-info {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .weather-desc {
+    font-size: 16px;
+    color: #cbd5e1;
+    font-weight: bold;
+    margin-bottom: 2px;
+  }
+
+  .temp-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .temp-current {
+    font-size: 24px;
+    font-weight: bold;
+    color: #ffffff;
+  }
+
+  .temp-minmax {
+    font-size: 16px;
+    font-weight: bold;
+  }
+  .temp-max { color: #ff7b7b; }
+  .temp-min { color: #7cc4ff; }
+</style>
+</head>
+<body>
+
+<div class="weather-box" id="widget">
+  <div class="slide-item center" id="initial-slide">
+    <div class="city-name">読込中</div>
+    <div class="weather-icon">⏳</div>
+    <div class="weather-info">
+      <div class="weather-desc">天気を取得中...</div>
+      <div class="temp-row">
+        <span class="temp-current">--℃</span>
+        <span class="temp-minmax">
+          <span class="temp-max">--</span> / <span class="temp-min">--</span>
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SWITCH_INTERVAL_SEC = 5;
+  const UPDATE_INTERVAL_MIN = 30;
+  const STORAGE_KEY = "obs_weather_selected_cities_v1";
+
+  // 選べる全都市マスターリスト
+  const ALL_CITIES = [
+    { name: "札幌",   lat: 43.0621, lon: 141.3544 },
+    { name: "仙台",   lat: 38.2682, lon: 140.8694 },
+    { name: "東京",   lat: 35.6895, lon: 139.6917 },
+    { name: "金沢",   lat: 36.5613, lon: 136.6562 },
+    { name: "名古屋", lat: 35.1815, lon: 136.9066 },
+    { name: "大阪",   lat: 34.6937, lon: 135.5023 },
+    { name: "広島",   lat: 34.3853, lon: 132.4553 },
+    { name: "福岡",   lat: 33.5904, lon: 130.4017 },
+    { name: "那覇",   lat: 26.2124, lon: 127.6809 }
+  ];
+
+  let activeCities = [];
+  let weatherDataList = [];
+  let currentIndex = 0;
+  let currentSlideEl = document.getElementById("initial-slide");
+  let fetchTimer = null;
+
+  // 保存された都市名リストを読み込む（なければ全都市）
+  function loadActiveCities() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const names = JSON.parse(saved);
+        if (Array.isArray(names) && names.length > 0) {
+          const matched = names
+            .map(n => ALL_CITIES.find(c => c.name === n))
+            .filter(Boolean);
+          if (matched.length > 0) return matched;
+        }
+      }
+    } catch (e) {}
+    return [...ALL_CITIES];
+  }
+
+  function parseWeatherCode(code) {
+    if (code === 0) return { icon: "☀️", text: "快晴" };
+    if (code <= 2) return { icon: "🌤️", text: "晴れ" };
+    if (code === 3) return { icon: "☁️", text: "くもり" };
+    if (code >= 45 && code <= 48) return { icon: "🌫️", text: "霧" };
+    if (code >= 51 && code <= 67) return { icon: "☔", text: "雨" };
+    if (code >= 71 && code <= 77) return { icon: "⛄", text: "雪" };
+    if (code >= 80 && code <= 82) return { icon: "🌦️", text: "にわか雨" };
+    if (code >= 85 && code <= 86) return { icon: "🌨️", text: "雪" };
+    if (code >= 95) return { icon: "⚡", text: "雷雨" };
+    return { icon: "☁️", text: "くもり" };
+  }
+
+  function createSlideElement(item, positionClass) {
+    const div = document.createElement("div");
+    div.className = `slide-item ${positionClass}`;
+    div.innerHTML = `
+      <div class="city-name">${item.name}</div>
+      <div class="weather-icon">${item.icon}</div>
+      <div class="weather-info">
+        <div class="weather-desc">${item.desc}</div>
+        <div class="temp-row">
+          <span class="temp-current">${item.temp}℃</span>
+          <span class="temp-minmax">
+            <span class="temp-max">${item.max}℃</span> / <span class="temp-min">${item.min}℃</span>
+          </span>
+        </div>
+      </div>
+    `;
+    return div;
+  }
+
+  async function fetchAllWeather(citiesToFetch) {
+    if (!citiesToFetch || citiesToFetch.length === 0) return;
+    try {
+      const lats = citiesToFetch.map(c => c.lat).join(",");
+      const lons = citiesToFetch.map(c => c.lon).join(",");
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=1`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+      const results = Array.isArray(data) ? data : [data];
+
+      weatherDataList = results.map((item, idx) => {
+        const w = parseWeatherCode(item.current.weather_code);
+        return {
+          name: citiesToFetch[idx].name,
+          icon: w.icon,
+          desc: w.text,
+          temp: Math.round(item.current.temperature_2m),
+          max: Math.round(item.daily.temperature_2m_max[0]),
+          min: Math.round(item.daily.temperature_2m_min[0])
+        };
+      });
+
+      currentIndex = 0;
+      if (weatherDataList.length > 0) {
+        slideToCity(0);
+      }
+    } catch (err) {
+      console.error("天気取得エラー:", err);
+    }
+  }
+
+  function slideToCity(index) {
+    if (weatherDataList.length === 0) return;
+    const widget = document.getElementById("widget");
+    const nextItem = weatherDataList[index];
+
+    const nextSlideEl = createSlideElement(nextItem, "right");
+    widget.appendChild(nextSlideEl);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (currentSlideEl) {
+          currentSlideEl.classList.remove("center");
+          currentSlideEl.classList.add("left");
+        }
+        nextSlideEl.classList.remove("right");
+        nextSlideEl.classList.add("center");
+
+        const oldSlide = currentSlideEl;
+        currentSlideEl = nextSlideEl;
+
+        setTimeout(() => {
+          if (oldSlide && oldSlide.parentNode) {
+            oldSlide.parentNode.removeChild(oldSlide);
+          }
+        }, 600);
+      });
+    });
+  }
+
+  // 地域リスト変更時の再読み込み処理
+  function applyCitySelection() {
+    activeCities = loadActiveCities();
+    fetchAllWeather(activeCities);
+  }
+
+  // ドックからの即時通知を受信
+  const channel = new BroadcastChannel("obs_weather_channel");
+  channel.onmessage = (event) => {
+    if (event.data && event.data.type === "UPDATE_CITIES") {
+      applyCitySelection();
+    }
+  };
+
+  // 別ウィンドウ等からの localStorage 変更も検知
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEY) {
+      applyCitySelection();
+    }
+  });
+
+  // 初期起動
+  applyCitySelection();
+
+  setInterval(() => {
+    if (weatherDataList.length > 0) {
+      currentIndex = (currentIndex + 1) % weatherDataList.length;
+      slideToCity(currentIndex);
+    }
+  }, SWITCH_INTERVAL_SEC * 1000);
+
+  fetchTimer = setInterval(() => {
+    fetchAllWeather(activeCities);
+  }, UPDATE_INTERVAL_MIN * 60 * 1000);
+</script>
+</body>
+</html>
